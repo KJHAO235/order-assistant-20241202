@@ -399,6 +399,6 @@ def upload_to_blob(file_path, blob_name):
         raise Exception(f"Failed to upload to Azure Blob Storage: {e}")
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5001))
+    port = int(os.environ.get("PORT", 8000))
     # make_static_tmp_dir()
     app.run(host="0.0.0.0", port=port, debug=True)
