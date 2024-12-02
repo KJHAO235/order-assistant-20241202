@@ -1,0 +1,7 @@
+Flask
+Pillow
+google-generativeai
+typing-extensions
+azure-cognitiveservices-speech
+line-bot-sdk
+
