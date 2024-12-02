@@ -9,6 +9,7 @@ import tempfile
 import google.generativeai as genai
 import typing_extensions as typing
 import azure.cognitiveservices.speech as speechsdk
+from azure.storage.blob import BlobServiceClient
 # from azure.cognitiveservices.speech import SpeechConfig, SpeechSynthesizer, AudioDataStream, SpeechSynthesisOutputFormat
 # from azure.cognitiveservices.speech.audio import AudioOutputConfig
 
@@ -37,8 +38,8 @@ from linebot.v3.messaging import (
 config = configparser.ConfigParser()
 config.read('config.ini')
 
-# 公開的 ngrok URL
-PUBLIC_URL = "https://order-assistant-20241202.azurewebsites.net"
+# 公開的 Azure URL
+# PUBLIC_URL = "https://order-assistant-20241202.azurewebsites.net"
 
 # 初始化 Line Messaging API 客戶端
 LINE_CHANNEL_ACCESS_TOKEN = config['Line']['CHANNEL_ACCESS_TOKEN']
@@ -51,7 +52,7 @@ if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_CHANNEL_SECRET:
 api_config = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
 
 # 設定檔案暫存資料夾
-static_tmp_path = os.path.join(os.path.dirname(__file__), 'static', 'tmp')
+# static_tmp_path = os.path.join(os.path.dirname(__file__), 'static', 'tmp')
 
 # 初始化 Webhook Handler
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
@@ -66,9 +67,17 @@ speech_region = config['Azure']['AZURE_REGION']
 speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
 speech_config.speech_synthesis_voice_name = "zh-CN-XiaoxiaoNeural" 
 
+# 設定 Azure Blob Service
+connection_string = config['Azure']['AZURE_STORAGE_CONNECTION_STRING']
+BLOB_CONTAINER_NAME = "static-tmp"
+blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+blob_container_client = blob_service_client.get_container_client(BLOB_CONTAINER_NAME)
+
 # 初始化 Flask 應用程式
 app = Flask(__name__)
-app.config["UPLOAD_FOLDER"] = "static/tmp"
+# app.config["UPLOAD_FOLDER"] = "static/tmp"
+# 設定檔案暫存資料夾
+# app.config["UPLOAD_FOLDER"] = tempfile.gettempdir()
 
 # 初始化全域變數來保存
 detected_language = ""
@@ -76,20 +85,20 @@ language_isornot = None
 function_type = ""
 
 # 創建暫存檔資料夾
-def make_static_tmp_dir():
-    try:
-        os.makedirs(static_tmp_path)
-    except OSError as exc:
-        if exc.errno == errno.EEXIST and os.path.isdir(static_tmp_path):
-            pass
-        else:
-            raise
+# def make_static_tmp_dir():
+#     try:
+#         os.makedirs(static_tmp_path)
+#     except OSError as exc:
+#         if exc.errno == errno.EEXIST and os.path.isdir(static_tmp_path):
+#             pass
+#         else:
+#             raise
 
 # 首頁
-@app.route('/static/tmp/<path:filename>', methods=['GET'])
-def serve_audio(filename):
-    """供應音訊檔案 URL 的端點"""
-    return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
+# @app.route('/static/tmp/<path:filename>', methods=['GET'])
+# def serve_audio(filename):
+#     """供應音訊檔案 URL 的端點"""
+#     return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -118,7 +127,7 @@ def handle_text_message(event: MessageEvent):
         if user_message.startswith("@"):
             # 提取語音內容
             speech_text = user_message[1:].strip()
-            audio_path = text_to_speech(speech_text)
+            audio_url = text_to_speech(speech_text)
 
             # 構造音訊檔案 URL
             # audio_url = f"{request.host_url}static/tmp/{os.path.basename(audio_path)}"
@@ -129,7 +138,7 @@ def handle_text_message(event: MessageEvent):
                     reply_token=event.reply_token,
                     messages=[
                         AudioMessage(
-                            original_content_url=f"{request.host_url}static/tmp/{os.path.basename(audio_path)}",
+                            original_content_url=audio_url,
                             duration=5000  # 假設固定時長
                         )
                     ]
@@ -231,39 +240,43 @@ def handle_audio_message(event: MessageEvent):
             os.remove(temp_audio_path)
 
 # Azure Speech文字轉語音
-# @app.route("/speech", methods=['POST'])
-# def speech():
-#     data = request.json
-#     text = data.get("text")
-#     if not text:
-#         return {"error": "text is required"}, 400
-
-#     speech_config.speech_synthesis_language = "zh-CN"
-#     speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config)
-#     result = speech_synthesizer.speak_text_async(text).get()
-#     if result.reason != speechsdk.ResultReason.SynthesizingAudioCompleted:
-#         return {"error": "failed to synthesize audio"}, 500
-
-#     audio = result.audio_data
-#     return {"audio": audio}
 def text_to_speech(text):
-    tmp_dir = "static/tmp"
-    os.makedirs(tmp_dir, exist_ok=True)
+    # tmp_dir = "static/tmp"
+    # os.makedirs(tmp_dir, exist_ok=True)
+    tmp_dir = tempfile.gettempdir()
     output_file = os.path.join(tmp_dir, "output.wav")
-
+    try:
+        # 配置音訊輸出
+        audio_config = speechsdk.audio.AudioOutputConfig(filename=output_file)
+        synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
+        
+        # 進行語音合成
+        result = synthesizer.speak_text_async(text).get()
+        
+        if result.reason == speechsdk.ResultReason.Canceled:
+            cancellation_details = result.cancellation_details
+            raise Exception(f"Speech synthesis canceled: {cancellation_details.reason}")
+        
+        # 上傳至 Blob Storage
+        blob_url = upload_to_blob(output_file, "output.wav")
+        return blob_url
+    except Exception as e:
+        raise Exception(f"Error during text-to-speech: {e}")
+    finally:
+        if os.path.exists(output_file):
+            os.remove(output_file)
     # 配置音訊輸出
-    audio_config = speechsdk.audio.AudioOutputConfig(filename=output_file)
-    synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
+    # audio_config = speechsdk.audio.AudioOutputConfig(filename=output_file)
+    # synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
 
-    # 進行語音合成
-    result = synthesizer.speak_text_async(text).get()
+    # # 進行語音合成
+    # result = synthesizer.speak_text_async(text).get()
 
-    if result.reason == result.reason.Canceled:
-        cancellation_details = result.cancellation_details
-        raise Exception(f"Speech synthesis canceled: {cancellation_details.reason}")
+    # if result.reason == result.reason.Canceled:
+    #     cancellation_details = result.cancellation_details
+    #     raise Exception(f"Speech synthesis canceled: {cancellation_details.reason}")
 
-    return output_file
-
+    # return upload_to_blob(output_file, "output.wav")
 
 # 判斷語言名稱
 def language_detection(language_msg):
@@ -288,12 +301,15 @@ def language_detection(language_msg):
             ]
         else:
             excute_sentence1 = f'語音將以{tran_language}表達'
-            excute_sentence2 = '請輸入想要翻譯的文字，並在文字前加上@符號，範例:@我想點牛排炸雞'
+            excute_sentence2 = '請輸入想要翻譯的文字，並在文字前加上@符號'
+            excute_sentence3 = '範例 - @我想點牛排'
             response1 = translation_function(tran_language, excute_sentence1)
             response2 = translation_function(tran_language, excute_sentence2)
+            response3 = translation_function(tran_language, excute_sentence3)
             return [
                 TextMessage(text=response1.text.replace('*', '').replace('\n', '')),
-                TextMessage(text=response2.text.replace('*', '').replace('\n', ''))
+                TextMessage(text=response2.text.replace('*', '').replace('\n', '')),
+                TextMessage(text=response3.text.replace('*', '').replace('\n', ''))
             ]
     else:
         language_isornot = False
@@ -367,9 +383,21 @@ def food_detection(tran_language, image):
         response = translation_function(tran_language, "圖片中未偵測到料理名稱")
         return [TextMessage(text=response.text.replace('*', '').replace('\n', ''))]
 
-
+# 上傳檔案到 Azure Blob Storage
+def upload_to_blob(file_path, blob_name):
+    # with open(file_path, "rb") as file_data:
+    #     blob_client = blob_container_client.get_blob_client(blob_name)
+    #     blob_client.upload_blob(file_data, overwrite=True)
+    # return f"https://{blob_service_client.account_name}.blob.core.windows.net/{BLOB_CONTAINER_NAME}/{blob_name}"
+    try:
+        with open(file_path, "rb") as file_data:
+            blob_client = blob_container_client.get_blob_client(blob_name)
+            blob_client.upload_blob(file_data, overwrite=True)
+        return f"https://{blob_service_client.account_name}.blob.core.windows.net/{BLOB_CONTAINER_NAME}/{blob_name}"
+    except Exception as e:
+        raise Exception(f"Failed to upload to Azure Blob Storage: {e}")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5001))
-    make_static_tmp_dir()
+    # make_static_tmp_dir()
     app.run(host="0.0.0.0", port=port, debug=True)

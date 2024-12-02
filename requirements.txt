@@ -3,5 +3,6 @@ Pillow
 google-generativeai
 typing-extensions
 azure-cognitiveservices-speech
+azure-storage-blob
 line-bot-sdk
 
