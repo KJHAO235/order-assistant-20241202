@@ -288,7 +288,7 @@ def language_detection(language_msg):
             ]
         else:
             excute_sentence1 = f'語音將以{tran_language}表達'
-            excute_sentence2 = '請輸入想要翻譯的文字，並在文字前加上@符號\u000A範例:@我想點牛排炸雞'
+            excute_sentence2 = '請輸入想要翻譯的文字，並在文字前加上@符號，範例:@我想點牛排炸雞'
             response1 = translation_function(tran_language, excute_sentence1)
             response2 = translation_function(tran_language, excute_sentence2)
             return [
