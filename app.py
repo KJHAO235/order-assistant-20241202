@@ -68,7 +68,7 @@ speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_re
 speech_config.speech_synthesis_voice_name = "zh-CN-XiaoxiaoNeural" 
 
 # 設定 Azure Blob Service
-connection_string = os.getenv('AZURE_STORAGE_ACCOUNT_KEY')
+connection_string = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
 # connection_string = config['Azure']['AZURE_STORAGE_CONNECTION_STRING']
 BLOB_CONTAINER_NAME = "static-tmp"
 blob_service_client = BlobServiceClient.from_connection_string(connection_string)
